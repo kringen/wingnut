@@ -1,0 +1,28 @@
+version: '3.9'
+
+# pip3 -m install podman-compose
+# podman network create --subnet 192.5.0.0/16 app-tier
+# podman-compose up -d
+
+networks:
+  app_tier: {}
+  default:
+    name: app-tier
+    external: true
+services:
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: rabbitmq
+    ports:
+        - 5672:5672
+        - 15672:15672
+    restart: always
+  #api:
+  #  image: kringen/wingnut-api:latest
+  #  container_name: api
+  #  hostname: api
+  #  ports:
+  #  - 8080:8080
+  #  environment:
+  #  - RABBIT_URL=amqp://guest:guest@localhost:5672
+  #  restart: always
