@@ -1,15 +1,15 @@
 package main
 
 import (
-	"encoding/json"
-	"log"
+	"context"
+	"fmt"
+	"log/slog"
 	"os"
 	"time"
 
 	rmq "github.com/kringen/message-center/rabbitmq"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
-
-var logger = log.New(os.Stdout, "INFO: ", log.Ldate|log.Ltime)
 
 const (
 	Version = "0.0.1"
@@ -18,7 +18,7 @@ const (
  _      __(_)___  ____  ____  __  __/ /_
 | | /| / / / __ \/ __ \/ __ \/ / / / __/
 | |/ |/ / / / / / /_/ / / / / /_/ / /_  
-|__/|__/_/_/ /_/\__, /_/ /_/\__,_/\__/  v%s
+|__/|__/_/_/ /_/\__, /_/ /_/\__,_/\__/  v0.0.1
                /____/                   
 `
 )
@@ -30,47 +30,7 @@ const (
 	}
 */
 
-type Configuration struct {
-	Mode      string `json:"mode"`
-	Objective string `json:"objective"`
-}
-
-func StatusCheck(status chan string) {
-	time.Sleep(100 * time.Second)
-	currentStatus := <-status
-	logger.Println(currentStatus)
-}
-
-func SetConfig(configChan chan string, messageCenter *rmq.MessageCenter, queue string) {
-	// Subscribing to QueueService1 for getting messages.
-	messages, err := messageCenter.Channel.Consume(
-		queue, // queue name
-		"",    // consumer
-		true,  // auto-ack
-		false, // exclusive
-		false, // no local
-		false, // no wait
-		nil,   // arguments
-	)
-	if err != nil {
-		log.Println(err)
-	}
-
-	// Build a welcome message.
-	log.Println("Successfully connected to RabbitMQ")
-	log.Println("Waiting for messages")
-	for message := range messages {
-		// For example, show received message in a console.
-		log.Printf(" > Received message: %s\n", message.Body)
-		var config Configuration
-		err := json.Unmarshal(message.Body, &config)
-		if err != nil {
-			log.Println(err)
-		}
-		log.Printf("Mode: %s\n", config.Mode)
-		log.Printf("Objective: %s\n", config.Objective)
-	}
-}
+var logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
 func createQueue(mc *rmq.MessageCenter, name string, durable bool, deleteUnused bool,
 	exclusive bool, noWait bool, arguments map[string]interface{}) error {
@@ -82,8 +42,27 @@ func createQueue(mc *rmq.MessageCenter, name string, durable bool, deleteUnused 
 	return nil
 }
 
+func publishMessage(messageCenter *rmq.MessageCenter, q string, message []byte) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var err error
+	err = messageCenter.Channel.PublishWithContext(ctx,
+		"",    // exchange
+		q,     // routing key
+		false, // mandatory
+		false, // immediate
+		amqp.Publishing{
+			ContentType: "application/json",
+			Body:        message,
+		})
+	if err != nil {
+		logger.Error("Failed to publish a message")
+	}
+	logger.Info(fmt.Sprintf(" [x] Sent %s\n", message))
+}
+
 func main() {
-	logger.Printf(banner, Version)
+	fmt.Print(banner)
 
 	// Establish messaging connection
 	messageCenter := rmq.MessageCenter{}
@@ -97,22 +76,21 @@ func main() {
 	defer messageCenter.Connection.Close()
 	defer messageCenter.Channel.Close()
 
-	logger.Printf("Creating queue for config...")
+	logger.Info("Creating queue for config...")
 	err = createQueue(&messageCenter, "config", false, false, false, false, nil)
+	logger.Info("Creating queue for health...")
+	err = createQueue(&messageCenter, "health", false, false, false, false, nil)
 
 	// Startup service channels
-	logger.Println("Starting Services...")
+	logger.Info("Starting Services...")
 	//chanChat := make(chan string)
-	chanStatus := make(chan string)
 	chanConfig := make(chan string)
-	go StatusCheck(chanStatus)
-	go SetConfig(chanConfig, &messageCenter, "config")
+	go StatusCheck()
+	go ConfigListen(chanConfig, &messageCenter, "config")
 
 	// Wait for Channel to complete
-	<-chanStatus
 	<-chanConfig
 
-	chanStatus <- "You da best!"
 	/*
 		// Wait for input
 		fmt.Println("Enter command:")
