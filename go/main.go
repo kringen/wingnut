@@ -68,6 +68,9 @@ func main() {
 	messageCenter := rmq.MessageCenter{}
 	// Define RabbitMQ server URL.
 	messageCenter.ServerUrl = os.Getenv("RABBIT_URL")
+	if messageCenter.ServerUrl == "" {
+		messageCenter.ServerUrl = "amqp://guest:guest@localhost:5672/"
+	}
 	channelName := "wingnut"
 	err := messageCenter.Connect(channelName, 5, 5)
 	if err != nil {
